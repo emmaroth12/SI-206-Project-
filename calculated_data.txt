@@ -1,4 +1,4 @@
 Day of the week counts (Sunday=0, ..., Saturday=6):
-0: 278, 1: 278, 2: 279, 3: 279, 4: 279, 5: 279, 6: 278
-Average sunrise time: 07:11:19
-Average sunset time: 19:16:25
+0: 285, 1: 285, 2: 286, 3: 286, 4: 286, 5: 286, 6: 286
+Average sunrise time: 07:10:38
+Average sunset time: 19:18:10
