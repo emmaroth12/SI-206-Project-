@@ -1,20 +1,23 @@
 import requests
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import pandas as pd
 
 # API Configuration
 WEATHER_API_URL = "https://archive-api.open-meteo.com/v1/era5"
 WEATHER_PARAMS = {
     "latitude": 42.28,
     "longitude": -83.74,
-    "start_date": "2024-08-01",
-    "end_date": "2024-11-30",
     "hourly": "temperature_2m"
 }
+BATCH_SIZE = 25  # Maximum number of records to store per run
 
-# Fetch weather data with a limit of 25 items
-def fetch_weather_data(api_url, params, start_date):
+# Fetch weather data
+def fetch_weather_data(api_url, params, start_date, end_date):
     params["start_date"] = start_date
+    params["end_date"] = end_date
     response = requests.get(api_url, params=params)
     if response.status_code == 200:
         data = response.json()
@@ -26,13 +29,9 @@ def fetch_weather_data(api_url, params, start_date):
             date = time.split("T")[0]  # Extract date
             daily_temperatures[date].append(temp)
 
-        # Convert to a structured list
-        result = [
-            {"date": date, "avg_temp": sum(temps) / len(temps)}
-            for date, temps in daily_temperatures.items()
-        ]
-
-        return result[:25]  # Limit to 25 rows
+        # Store raw temperature data as a list for each date
+        result = [{"date": date, "temps": temps} for date, temps in daily_temperatures.items()]
+        return result
     else:
         print(f"Error fetching data: {response.status_code}")
         return []
@@ -45,105 +44,108 @@ def setup_database(db_name):
         CREATE TABLE IF NOT EXISTS weather (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL UNIQUE,
-            avg_temp REAL NOT NULL
+            temps TEXT NOT NULL
         )
     ''')
     return conn, cursor
 
-# Insert weather data into the database
+# Insert raw weather data into the database
 def insert_weather_data(cursor, weather_data):
     for record in weather_data:
+        # Convert the temperatures list to a comma-separated string for storage
+        temps_str = ",".join(map(str, record["temps"]))
         cursor.execute('''
-            INSERT OR IGNORE INTO weather (date, avg_temp)
+            INSERT OR IGNORE INTO weather (date, temps)
             VALUES (?, ?)
-        ''', (record["date"], record["avg_temp"]))
+        ''', (record["date"], temps_str))
 
 # Get the last inserted date from the database
 def get_last_inserted_date(cursor):
     cursor.execute('SELECT MAX(date) FROM weather')
     result = cursor.fetchone()
-    return result[0] if result[0] else "2024-08-01"  # Default to API start_date
+    return result[0] if result[0] else None
 
-# Calculate the overall average temperature
-def calculate_overall_average(cursor):
-    cursor.execute('SELECT AVG(avg_temp) FROM weather')
-    result = cursor.fetchone()
-    if result and result[0] is not None:
-        return result[0]
-    return None
+# Fetch data to store in batches
+def store_data_in_batches(db_name, api_url, params, batch_size):
+    conn, cursor = setup_database(db_name)
 
-def fetch_daily_average_temperatures(db_name):
-    """
-    Fetches daily average temperatures from the weather table in the database.
-    
-    Parameters:
-    - db_name: str, name of the SQLite database.
-    
-    Returns:
-    - DataFrame containing date and avg_temp columns.
-    """
-    conn = sqlite3.connect(db_name)
-    query = """
-    SELECT date, avg_temp 
-    FROM weather 
-    ORDER BY date;
-    """
-    df = pd.read_sql_query(query, conn)
+    # Get the last inserted date
+    last_date = get_last_inserted_date(cursor)
+
+    # If no data exists in the database, set a default start date
+    start_date = (datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") if last_date else params.get("start_date")
+    end_date = params.get("end_date")
+
+    # Fetch and store data
+    weather_data = fetch_weather_data(api_url, params, start_date, end_date)
+    if weather_data:
+        batch = weather_data[:batch_size]  # Limit the data to the batch size
+        insert_weather_data(cursor, batch)
+        conn.commit()
+        print(f"Inserted {len(batch)} records into the database.")
+    else:
+        print("No new data fetched.")
+
     conn.close()
-    return df
 
+# Perform calculations on the data
+def calculate_daily_averages(db_name):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute('SELECT date, temps FROM weather')
+    rows = cursor.fetchall()
+    conn.close()
 
-import matplotlib.pyplot as plt
-import pandas as pd
+    # Calculate averages
+    results = []
+    for date, temps_str in rows:
+        temps = list(map(float, temps_str.split(",")))  # Convert back to list of floats
+        avg_temp = sum(temps) / len(temps)  # Calculate average
+        results.append({"date": date, "avg_temp": avg_temp})
 
-def plot_data(db_name):
-    """
-    Fetches daily average temperatures from the database and plots them.
-    
-    Parameters:
-    - db_name: str, name of the SQLite database.
-    """
-    # Fetch data from the database
-    df = fetch_daily_average_temperatures(db_name)
-    
-    # Ensure the date column is in datetime format
-    df['date'] = pd.to_datetime(df['date'])
-    
+    return results
+
+# Save calculations to file
+def save_calculations_to_file(calculations, file_name="calculations.txt"):
+    with open(file_name, "w") as file:
+        file.write("Date, Average Temperature (°C)\n")
+        for record in calculations:
+            file.write(f"{record['date']}, {record['avg_temp']:.2f}\n")
+    print(f"Calculations written to {file_name}.")
+
+# Plot the data
+def plot_data(calculations):
+    df = pd.DataFrame(calculations)
+    df["date"] = pd.to_datetime(df["date"])
+
     # Plot the data
     plt.figure(figsize=(12, 6))
-    plt.plot(df['date'], df['avg_temp'], marker='o', linestyle='-', color='blue', linewidth=2)
+    plt.plot(df["date"], df["avg_temp"], marker="o", linestyle="-", linewidth=2)
     plt.title("Daily Average Temperatures", fontsize=16)
     plt.xlabel("Date", fontsize=12)
     plt.ylabel("Average Temperature (°C)", fontsize=12)
-    plt.xticks(rotation=45, fontsize=10)
+    plt.xticks(rotation=45)
     plt.grid(alpha=0.4)
     plt.tight_layout()
     plt.show()
 
-# Main Function
-def main():
-    db_name = 'weather.db'
-    conn, cursor = setup_database(db_name)
+# Main function
+def main_with_visualization():
+    db_name = "weather.db"
+    WEATHER_PARAMS["start_date"] = "2024-08-01"
+    WEATHER_PARAMS["end_date"] = "2024-11-30"
 
-    # Get the last inserted date and fetch new data
-    last_date = get_last_inserted_date(cursor)
-    weather_data = fetch_weather_data(WEATHER_API_URL, WEATHER_PARAMS, last_date)
-    if weather_data:
-        insert_weather_data(cursor, weather_data)
-        conn.commit()
-        print(f"Inserted {len(weather_data)} records into the database.")
+    # Store data in batches
+    store_data_in_batches(db_name, WEATHER_API_URL, WEATHER_PARAMS, BATCH_SIZE)
 
-    # Calculate and display the overall average temperature
-    overall_avg = calculate_overall_average(cursor)
-    if overall_avg is not None:
-        print(f"The overall average temperature from August to November 30 is {overall_avg:.2f}°C.")
-    else:
-        print("No data available to calculate the average.")
+    # Calculate daily averages
+    calculations = calculate_daily_averages(db_name)
 
-    # Plot the daily average temperatures
-    plot_data(db_name)
+    # Save calculations to file
+    save_calculations_to_file(calculations)
 
-    conn.close()
+    # Visualize the data
+    plot_data(calculations)
 
 if __name__ == "__main__":
-    main()
+    main_with_visualization()
