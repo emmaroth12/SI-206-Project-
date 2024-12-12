@@ -16,7 +16,7 @@ BATCH_SIZE = 25  # Maximum number of records to store per run
 
 # Fetch weather data
 def fetch_weather_data(api_url, params, start_date, end_date):
-    params["start_date"] = start_date
+    params["start_date"] = start_date 
     params["end_date"] = end_date
     response = requests.get(api_url, params=params)
     if response.status_code == 200:
@@ -24,12 +24,12 @@ def fetch_weather_data(api_url, params, start_date, end_date):
         times = data["hourly"]["time"]
         temperatures = data["hourly"]["temperature_2m"]
 
-        daily_temperatures = defaultdict(list)
+        daily_temperatures = defaultdict(list) #create dictionary
         for time, temp in zip(times, temperatures):
             date = time.split("T")[0]  # Extract date
             daily_temperatures[date].append(temp)
 
-        # Store raw temperature data as a list for each date
+        # raw temperature data 
         result = [{"date": date, "temps": temps} for date, temps in daily_temperatures.items()]
         return result
     else:
@@ -40,19 +40,21 @@ def fetch_weather_data(api_url, params, start_date, end_date):
 def setup_database(db_name):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
+    #database to store weather data
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS weather (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL UNIQUE,
             temps TEXT NOT NULL
-        )
+        ) 
     ''')
     return conn, cursor
 
 # Insert raw weather data into the database
 def insert_weather_data(cursor, weather_data):
     for record in weather_data:
-        # Convert the temperatures list to a comma-separated string for storage
+    #list to string temperature 
+
         temps_str = ",".join(map(str, record["temps"]))
         cursor.execute('''
             INSERT OR IGNORE INTO weather (date, temps)
