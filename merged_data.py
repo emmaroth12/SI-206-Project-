@@ -1,3 +1,7 @@
+# ------------------
+# Merging Databases
+# ------------------
+
 import sqlite3
 
 def merge_databases(db_filenames, merged_db_filename):
