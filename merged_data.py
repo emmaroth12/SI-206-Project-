@@ -1,78 +1,3 @@
-# ------------------
-# Merging Databases
-# ------------------
-
-import sqlite3
-
-def merge_databases(db_filenames, merged_db_filename):
-    """
-    This function merges multiple SQLite databases into one.
-    Args:
-    - db_filenames: list of database filenames to merge.
-    - merged_db_filename: filename of the merged database.
-    """
-    conn = sqlite3.connect(merged_db_filename)
-    cur = conn.cursor()
-
-    # Create the combined tables
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS weather (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL UNIQUE,
-        temps TEXT NOT NULL
-    )''')
-
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS uv_data (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        location_id INTEGER,
-        date TEXT,
-        max_uv REAL,
-        min_uv REAL,
-        max_uv_time TEXT
-    )''')
-
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS SunriseSunset (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date_id INTEGER,
-        sunrise TEXT,
-        sunset TEXT,
-        FOREIGN KEY (date_id) REFERENCES Dates(id)
-    )''')
-
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS Dates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT UNIQUE
-    )''')
-
-    for db_filename in db_filenames:
-        attach_db_name = db_filename.split('.')[0]
-        cur.execute(f"ATTACH DATABASE '{db_filename}' AS {attach_db_name}")
-        
-        # Check and insert data from weather table
-        tables = cur.execute(f"SELECT name FROM {attach_db_name}.sqlite_master WHERE type='table'").fetchall()
-        table_names = {table[0] for table in tables}
-
-        if 'weather' in table_names:
-            cur.execute(f"INSERT OR IGNORE INTO weather (date, temps) SELECT date, temps FROM {attach_db_name}.weather")
-
-        # Check and insert data from uv_data table
-        if 'uv_data' in table_names:
-            cur.execute(f"INSERT OR IGNORE INTO uv_data (location_id, date, max_uv, min_uv, max_uv_time) SELECT location_id, date, max_uv, min_uv, max_uv_time FROM {attach_db_name}.uv_data")
-
-        # Check and insert data from SunriseSunset and Dates tables and update foreign keys
-        if 'Dates' in table_names:
-            cur.execute(f"INSERT OR IGNORE INTO Dates (date) SELECT date FROM {attach_db_name}.Dates")
-        
-        if 'SunriseSunset' in table_names:
-            cur.execute(f"INSERT OR IGNORE INTO SunriseSunset (date_id, sunrise, sunset) SELECT date_id, sunrise, sunset FROM {attach_db_name}.SunriseSunset")
-
-    conn.commit()
-    conn.close()
-
-
 # -----------------------
 # Weather Data Functions
 # -----------------------
@@ -112,7 +37,7 @@ def fetch_weather_data(api_url, params, start_date, end_date):
         print(f"Error fetching data: {response.status_code}")
         return []
 
-def setup_database(db_name):
+def setup_weather_database(db_name):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
     cursor.execute('''
@@ -138,7 +63,7 @@ def get_last_inserted_date(cursor):
     return result[0] if result[0] else None
 
 def store_data_in_batches(db_name, api_url, params, batch_size):
-    conn, cursor = setup_database(db_name)
+    conn, cursor = setup_weather_database(db_name)
 
     last_date = get_last_inserted_date(cursor)
     start_date = (datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") if last_date else params.get("start_date")
@@ -534,6 +459,126 @@ def main():
 if __name__ == "__main__":
     main()
 
+# ---------------------
+# Merge Database Tables
+# ---------------------
+
+def setup_merged_database(db_name):
+    conn = sqlite3.connect(db_name)
+    cur = conn.cursor()
+
+    # Create necessary tables in the merged database
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS weather (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL UNIQUE,
+        temps TEXT NOT NULL
+    )''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS uv_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        location_id INTEGER,
+        date TEXT,
+        max_uv REAL,
+        min_uv REAL,
+        max_uv_time TEXT
+    )''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS SunriseSunset (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date_id INTEGER,
+        sunrise TEXT,
+        sunset TEXT,
+        FOREIGN KEY (date_id) REFERENCES Dates(id)
+    )''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS Dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT UNIQUE
+    )''')
+
+    conn.commit()
+    conn.close()
+
+# ----------------
+# Merged Databases
+# ----------------
+
+def merge_databases(db_filenames, merged_db_filename):
+    """
+    This function merges multiple SQLite databases into one.
+    Args:
+    - db_filenames: list of database filenames to merge.
+    - merged_db_filename: filename of the merged database.
+    """
+    conn = sqlite3.connect(merged_db_filename)
+    cur = conn.cursor()
+    
+    # Create the combined tables
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS weather (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL UNIQUE,
+        temps TEXT NOT NULL
+    )''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS uv_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        location_id INTEGER,
+        date TEXT,
+        max_uv REAL,
+        min_uv REAL,
+        max_uv_time TEXT
+    )''')
+        
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS SunriseSunset (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date_id INTEGER,
+        sunrise TEXT,
+        sunset TEXT,
+        FOREIGN KEY (date_id) REFERENCES Dates(id)
+    )''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS Dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT UNIQUE
+    )''')
+
+    for db_filename in db_filenames:
+        attach_db_name = db_filename.split('.')[0]
+        cur.execute(f"ATTACH DATABASE '{db_filename}' AS {attach_db_name}")
+        
+        # Check and insert data from weather table
+        tables = cur.execute(f"SELECT name FROM {attach_db_name}.sqlite_master WHERE type='table'").fetchall()
+        table_names = {table[0] for table in tables}
+
+        if 'weather' in table_names:
+            cur.execute(f"INSERT OR IGNORE INTO weather (date, temps) SELECT date, temps FROM {attach_db_name}.weather")
+
+        # Check and insert data from uv_data table
+        if 'uv_data' in table_names:
+            cur.execute(f"INSERT OR IGNORE INTO uv_data (location_id, date, max_uv, min_uv, max_uv_time) SELECT location_id, date, max_uv, min_uv, max_uv_time FROM {attach_db_name}.uv_data")
+
+        # Check and insert data from SunriseSunset and Dates tables and update foreign keys
+        if 'Dates' in table_names:
+            cur.execute(f"INSERT OR IGNORE INTO Dates (date) SELECT date FROM {attach_db_name}.Dates")
+        
+        if 'SunriseSunset' in table_names:
+            cur.execute(f"INSERT OR IGNORE INTO SunriseSunset (date_id, sunrise, sunset) SELECT date_id, sunrise, sunset FROM {attach_db_name}.SunriseSunset")
+
+    conn.commit()
+    conn.close()
+
+# ------------------
+# Merged Data Function
+# ------------------
+
 def main_combined():
     # Step 1: Define the filenames of the individual databases
     db_files = ['weather.db', 'uv_data.db', 'sunrise_sunset.db']
@@ -543,8 +588,11 @@ def main_combined():
     
     # Step 3: Merge the databases into one
     merge_databases(db_files, merged_db)
+
+    # Step 4: Setup the merged database tables
+    setup_merged_database(merged_db)
     
-    # Step 4: Weather data operations
+    # Step 5: Weather data operations
     WEATHER_PARAMS["start_date"] = "2024-08-01"
     WEATHER_PARAMS["end_date"] = "2024-11-30"
     store_data_in_batches(merged_db, WEATHER_API_URL, WEATHER_PARAMS, BATCH_SIZE)
@@ -552,14 +600,13 @@ def main_combined():
     save_calculations_to_file(weather_calculations, "weather_calculations.txt")
     plot_data(weather_calculations)
 
-    # Step 5: UV data operations
+    # Step 6: UV data operations
+    create_tables()  # Ensure UV tables are created in the merged database
     latitude = 42.2808
     longitude = -83.7430
     altitude = 200
     start_date = '2024-08-01'
     end_date = '2024-12-01'
-    
-    create_tables()  # Ensure UV tables are created in the merged database
     uv_data = collect_uv_month_data(latitude, longitude, altitude, start_date, end_date)
     if uv_data:
         store_uv_data_with_min_max(uv_data, latitude, longitude, altitude)
@@ -567,10 +614,10 @@ def main_combined():
     average_uv = calculate_average_uv()
     print(f"Average UV index: {average_uv:.2f}")
 
-    # Step 6: Sunrise/Sunset operations
-    setup_database(merged_db)  # Ensure SunriseSunset tables are created in the merged database
-    get_and_store_data(merged_db)
-    day_counts, sunrise_times, sunset_times, dates = process_and_calculate_data(merged_db)
+    # Step 7: Sunrise/Sunset operations
+    setup_database()  # Existing sunrise/sunset setup, assuming it's the one without parameters
+    get_and_store_data()
+    day_counts, sunrise_times, sunset_times, dates = process_and_calculate_data()
     visualize_data(day_counts, sunrise_times, sunset_times, dates)
 
 if __name__ == "__main__":
